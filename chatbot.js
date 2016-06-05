@@ -1,7 +1,6 @@
-var redis = require('redis');
 var Web3 = require("web3");
 var theDAOInterface = require('./thedao.js');
-var firebase = require('firebase');
+var Botkit = require('botkit');
 
 var web3 = new Web3();
 web3.setProvider(new web3.providers.HttpProvider());
@@ -11,7 +10,6 @@ var theDAO = web3.eth.contract(theDAOInterface).at('0xbb9bc244d798123fde783fcc1c
 var DIRECT = ['direct_message','direct_mention','mention'];
 var RAW_LISTENERS = [];
 var VOTE_LISTENERS = [];
-var Botkit = require('botkit');
 var statsbot;
 
 var controller = Botkit.slackbot({
