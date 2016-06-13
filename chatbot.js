@@ -1,6 +1,14 @@
+var redis = require('redis');
 var Web3 = require("web3");
 var theDAOInterface = require('./thedao.js');
-var Botkit = require('botkit');
+var firebase = require('firebase');
+var splunk = require('splunk-sdk');
+var etherScan = require('./etherscan-websocket.js');
+var service = new splunk.Service({username:"admin", password:"", host:""})
+service.login(function(err, success) {
+    if(err)
+        process.exit(1)
+});
 
 var web3 = new Web3();
 web3.setProvider(new web3.providers.HttpProvider());
@@ -10,6 +18,8 @@ var theDAO = web3.eth.contract(theDAOInterface).at('0xbb9bc244d798123fde783fcc1c
 var DIRECT = ['direct_message','direct_mention','mention'];
 var RAW_LISTENERS = [];
 var VOTE_LISTENERS = [];
+var TX_LISTENERS = [];
+var Botkit = require('botkit');
 var statsbot;
 
 var controller = Botkit.slackbot({
@@ -20,7 +30,7 @@ var controller = Botkit.slackbot({
 
 // connect the bot to a stream of messages
 controller.spawn({
-  token: '<slack-bot-user-token',
+  token: '',
 }).startRTM()
 
 // get all DAO events
@@ -33,9 +43,10 @@ var handlers = [];
 
 // this is a bad way to do this
 // RAW TX HANDLER
-handlers.push(function(evt) { for (rl in RAW_LISTENERS) { if (evt.event != 'Transfer') { RAW_LISTENERS[rl](evt) } } })
+handlers.push(function(evt) { for (rl in RAW_LISTENERS) { if (evt.event != 'Transfer') { RAW_LISTENERS[rl](evt) } } });
 // LISTEN FOR VOTES
-handlers.push(function(evt) { for (vl in VOTE_LISTENERS) { if (evt.event === 'Voted') { VOTE_LISTENERS[vl](evt) } } })
+handlers.push(function(evt) { for (vl in VOTE_LISTENERS) { if (evt.event === 'Voted') { VOTE_LISTENERS[vl](evt) } } });
+handlers.push(function(evt) { for (txl in TX_LISTENERS) { if (evt.func) {TX_LISTENERS[txl](evt)}}});
 function dispatcher(evt) {
    for (handler in handlers) {
         handlers[handler](evt);
@@ -49,7 +60,14 @@ controller.on('hello', function(bot, msg) {
     console.log('CONNECTED to theDAO Slack');
     votingStats(controller);
     statsbot = bot;
+    etherScan(function(data) {
+        dispatcher(data);
+    });
 });
+
+// log messages to splunk
+controller.on('direct_message', function(bot, message){service.log(message, {sourcetype:"slackMessages"})});
+controller.on('ambient', function(bot, message){service.log(message, {sourcetype:"slackMessages"})});
 
 controller.hears('hello',['direct_message','direct_mention','mention'],function(bot,message) {
   bot.reply(message,'Hello yourself.');
@@ -75,6 +93,19 @@ function votingStats(controller) {
         if (state == 'on') {
             VOTE_LISTENERS.push(function(evt) {
                 bot.reply(message, evt.args.voter + " Voted: *" + evt.args.position + "* on Proposal ID: *" + evt.args.proposalID) +"*";
+            });
+            return;
+        }
+    });
+
+    controller.hears('etherscan (.*) (.*)', DIRECT, function(bot, message) {
+        var state = message.match[1];
+        var func = message.match[2];
+        console.log(state, func);
+        if (state === 'watch') {
+            TX_LISTENERS.push(function(evt) {
+               if(evt.func === func) 
+                bot.reply(message, JSON.stringify(evt)); 
             });
             return;
         }
